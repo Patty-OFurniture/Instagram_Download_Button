@@ -332,8 +332,7 @@
                         .pop();
                     mediaName = mediaName.substring(0, mediaName.lastIndexOf('.'));
                     let datetime = new Date(articleNode.querySelector('time').getAttribute('datetime'));
-                    let posterName = articleNode.querySelector('header a') || findPostName(articleNode);
-                    posterName = posterName.getAttribute('href').replace(/\//g, '');
+                    let posterName = findPostName(articleNode);
                     let postId = findPostId(articleNode);
                     let filename = filenameFormat(postFilenameTemplate, posterName, datetime, mediaName, postId, mediaIndex);
                     downloadResource(url, filename);
@@ -423,7 +422,7 @@
     async function getUrlFromInfoApi(articleNode, mediaIdx = 0) {
         // return media url if found else return null
         // fetch flow:
-        //	 1. find post id
+        //     1. find post id
         //   2. use step1 post id to send request to get post page
         //   3. find media id from the reponse text of step2
         //   4. find app id in clicked page
@@ -465,13 +464,15 @@
                     let postUrl = `https://www.instagram.com/p/${postId}/`;
                     let resp = await fetch(postUrl);
                     let text = await resp.text();
-                    console.log(`Searching for media ID in: ${text}`);
                     let idMatch = text.match(mediaIdPattern);
                     let mediaId = null;
                     for (let i = 0; i < idMatch.length; ++i) {
                         if (idMatch[i]) mediaId = idMatch[i];
                     }
-                    if (!mediaId) return null;
+                    if (!mediaId) {
+                        console.log(`Did not find media ID in: ${text}`);
+                        return null;
+                    }
                     mediaIdCache[postId] = mediaId;
                 }
                 return mediaIdCache[postId];
@@ -527,7 +528,25 @@
     }
 
     function findPostName(articleNode) {
-        // videos are handled differently
+
+        // this was a check in the caller,
+        // articleNode.querySelector('header a') || findPostName(articleNode)
+        // this now returns just the poster name [string]
+        let headerAnchors = articleNode.querySelector('header a');
+        if (headerAnchors)
+        {
+            for (let i = 0; i < headerAnchors.length; i++) {
+                let match = headerAnchors[i].getAttribute('href').match(/\/([a-zA-Z0-9_\-.]*)\/follow/g);
+                if (match) {
+                    let posterName = match[1];
+                    console.log('Poster ' + posterName);
+                    if (headerAnchors.includes(posterName)) {
+                        return posterName;
+                    }
+                }
+            }
+        }
+
         let imgAlt = articleNode.querySelector('canvas ~ * img');
         if (imgAlt) {
             imgAlt = imgAlt.getAttribute('alt');
@@ -535,12 +554,16 @@
             for (let i = 0; i < links.length; i++) {
                 const posterName = links[i].getAttribute('href').replace(/\//g, '');
                 if (imgAlt.includes(posterName)) {
-                    return links[i];
+                    return posterName;
                 }
             }
-        } else {
-            // first H2 with a direction set
-            const el = document.querySelector('h2[dir]');
+        }
+
+        // video posts/stories dont always have a canvas
+        // so if that didn't work:
+        // first H2 with a direction set
+        let el = document.querySelector('h2[dir]');
+        if (el) {
             return el.innerText;
         }
     }
@@ -558,13 +581,19 @@
     }
 
     async function fetchVideoURL(articleNode, videoElem) {
-        let poster = videoElem.getAttribute('poster');
         let timeNodes = articleNode.querySelectorAll('time');
         // special thanks 孙年忠 (https://greasyfork.org/en/scripts/406535-instagram-download-button/discussions/120159)
         let posterUrl = timeNodes[timeNodes.length - 1].parentNode.parentNode.href;
         const posterPattern = /\/([^\/?]*)\?/;
-        let posterMatch = poster.match(posterPattern);
-        let postFileName = posterMatch[1];
+        let postFileName = "";
+        let poster = videoElem.getAttribute('poster');
+        if (poster) {
+            let posterMatch = poster.match(posterPattern);
+            postFileName = posterMatch[1];
+        } else {
+            postFileName = findPostName(articleNode);
+        }
+
         let resp = await fetch(posterUrl);
         let content = await resp.text();
         // special thanks to 孙年忠 for the pattern (https://greasyfork.org/zh-TW/scripts/406535-instagram-download-button/discussions/116675)
@@ -709,8 +738,8 @@
         }
         fetch(url, {
             headers: new Headers({
-                'User-Agent': window.navigator.userAgent,
-                Origin: location.origin,
+                // 'User-Agent': window.navigator.userAgent,
+                // Origin: location.origin,
             }),
             mode: 'cors',
         })
